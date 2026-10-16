@@ -4,11 +4,11 @@
 
 ## 直接下载
 
-各平台版本分别更新。v1.3.0 Release 同时附带 Windows v1.2.6 安装包，文件保留原构建版本号。
+各平台版本分别更新。v1.3.0 Release 同时附带 Windows v1.2.7 安装包，文件保留原构建版本号。
 
 | 平台 | 下载 |
 | --- | --- |
-| Windows x64 · v1.2.6 | [下载 ZIP，解压运行 ClearPlate.exe](https://github.com/KiyaKike/clearplate-desktop/releases/download/v1.2.6/ClearPlate-Windows-x64-v1.2.6.zip) |
+| Windows x64 · v1.2.7 | [下载 ZIP，解压运行 ClearPlate.exe](https://github.com/KiyaKike/clearplate-desktop/releases/download/v1.2.7/ClearPlate-Windows-x64-v1.2.7.zip) |
 | macOS · v1.2.4 | [下载通用 ZIP](https://github.com/KiyaKike/clearplate-desktop/releases/download/v1.2.4/ClearPlate-macOS-universal-v1.2.4.zip) |
 | Linux Docker · v1.3.0 | [下载源码部署包](https://github.com/KiyaKike/clearplate-desktop/releases/download/v1.3.0/ClearPlate-Server-Docker-v1.3.0.tar.gz) |
 
@@ -32,13 +32,13 @@ Mac 版同步了临时采集、超时/退出恢复、同账号核验、防重复
 
 ## Windows 下载与使用
 
-从 [v1.2.6 Windows 下载页](https://github.com/KiyaKike/clearplate-desktop/releases/tag/v1.2.6) 下载 `ClearPlate-Windows-x64-v1.2.6.zip`，解压后运行 `ClearPlate.exe`。发布包包含运行时，无需另装 .NET。目标为 Windows x64；建议 Windows 11。
+从 [v1.2.7 Windows 下载页](https://github.com/KiyaKike/clearplate-desktop/releases/tag/v1.2.7) 下载 `ClearPlate-Windows-x64-v1.2.7.zip`，解压后运行 `ClearPlate.exe`。发布包包含运行时，无需另装 .NET。目标为 Windows x64；建议 Windows 11。
 
 主界面保留 **“立即打卡 / 连接微信 / 更多”**，程序、窗口和托盘使用统一的光盘图标。首次使用点击 **“连接微信”**，缺少会话或平台明确返回失效时，才显示临时采集说明；自行同意后，正常打开光盘打卡小程序首页或“我的”。捕获后自动停止代理、核验账号并保存，不需要自己查找或复制 token。首次绑定时确认平台返回账号属于本人。组织 ID 按本人请求设置；Windows 不再要求填写经纬度，在连接、账号核验和每次上传前，从同一账号的 `last_location` 同步微信小程序最近位置。该字段是平台保留的最近位置，不等于电脑实时定位；移动后请先在小程序更新位置，再用“更多 → 同步微信最近位置”检查。缺失或格式无效时停止上传并提示重试，不使用旧的手填位置兜底。首次安装默认关闭计划，升级保留计划和防重复记录。
 
 已有登录有效时，“连接微信”仅只读检查并直接复用，不重新设置代理或证书。断网、HTTP 500、TLS 错误或账号不一致不会误触发采集。“选择照片打卡”“检查账号状态”“打开光盘小程序”“重新获取微信登录”和备用的手动导入收在“更多”中；主动重新获取仍先显示采集确认。单独打开小程序不启动采集。
 
-这是 **1.2.6 试验功能**。当前源码修复了 Windows Schannel 无法使用内存临时私钥而导致 `CLIENT_TLS` 的问题；Windows 11 / 微信 4.1.15.50 实际获取 token 已由使用者确认成功，本地回环 TLS、密钥清理及界面/DPAPI 检查也已通过。本机已验证从微信账号同步到有效最近位置。照片上传的 multipart 格式已修复：采用浏览器兼容的边界与字段头、保持文件字段最后发送；一次授权的真实内置图上传已返回 HTTP 200，未提交打卡。网络错误提示区分申请上传凭证、发送照片和提交打卡，仅显示步骤及错误码，不自动重试上传。如果该版本微信不采用系统代理或拒绝临时证书，工具会给出提示或在 3 分钟后结束，并恢复设置；不能保证所有版本都能获取。组织与位置没有预填任何人的真实数据。获取/导入 token 不会额外上传照片或打卡。
+这是 **1.2.7 试验功能**。本次合并 [PR #1](https://github.com/KiyaKike/clearplate-desktop/pull/1)，修复了 Windows Schannel 无法使用内存临时私钥而导致 `CLIENT_TLS` 的问题；PR 贡献者在 Windows 11 / 微信 4.1.15.50 实测并报告 token 获取、最近位置同步、回环 TLS、密钥清理及界面/DPAPI 检查成功。照片上传的 multipart 格式已修复：采用浏览器兼容的边界与字段头、保持文件字段最后发送；PR 贡献者报告一次授权的真实内置图上传返回 HTTP 200，未提交打卡。网络错误提示区分申请上传凭证、发送照片和提交打卡，仅显示步骤及错误码，不自动重试上传。如果该版本微信不采用系统代理或拒绝临时证书，工具会给出提示或在 3 分钟后结束，并恢复设置；不能保证所有版本都能获取。组织与位置没有预填任何人的真实数据。获取/导入 token 不会额外上传照片或打卡。
 
 **上传前失败的重试修复**：确定尚未开始上传的照片读取、准备或账号查询失败，不再占用时段，可在问题解决后选择原时段并点击“立即打卡”重试。升级时仅释放旧记录中“准备照片 / 查询账号”阶段的明确终止失败，保留原错误和时间，并标记为只允许手动重试，不会自动补交。查询时的暂时网络故障仍仅在原 5 分钟窗口内自动重试；TLS、服务器错误等不自动循环。已开始上传、提交结果未确认、已成功或缺少明确阶段的记录继续受防重复保护。补打仍受平台剩余次数与两小时间隔限制。
 
@@ -58,7 +58,7 @@ token 用 Windows **DPAPI / CurrentUser** 加密保存到 `%LOCALAPPDATA%\ClearP
 
 首次导入只读核验并绑定账号。后续导入或平台返回不同 token 时必须再次验证同一账号；错误账号和无效候选不会替换原会话。业务码 `10003` 或 HTTP `401` 会暂停自动提交。
 
-## 微信辅助自动同步（Windows 1.2.6 试验版）
+## 微信辅助自动同步（Windows 1.2.7 试验版）
 
 缺少或失效登录时点击“连接微信”，或在“更多”中主动重新获取，并在 Windows 确认同意后，才会启用监听 `127.0.0.1` 随机端口的临时系统代理和当前用户临时根证书。该证书具有光盘 API 域名的关键名称约束，根证书约 6 分钟到期，服务证书约 5 分钟到期。根证书私钥只在内存中；Windows 服务证书私钥使用 Schannel 可访问的当前用户临时密钥容器，释放证书时删除，不设置 `PersistKeySet`，不导出到 PFX 文件。若进程被强制终止，正常释放无法保证完成，可能留下该短期服务证书的密钥容器。其他平台继续使用内存私钥。
 
@@ -84,7 +84,7 @@ artifacts\win-x64\ClearPlate.exe --smoke-test
 
 可选安装 Python 3.9+ 后运行 `python scripts/package-windows.py`，生成只包含 EXE、README 和许可文件的 ZIP；打包不复制本地会话或状态文件。
 
-测试使用模拟 HTTP，不连接真实账号、不上传或打卡。当前源码已在 Windows 11、.NET 10 SDK 10.0.402 下通过 108 项核心/位置/上传检查和 37 项采集协议 / 隔离本地 TLS 检查，包括默认 TLS 协商、TLS 1.2、HTTP/1.1、握手后密钥清理、位置缺失时禁止上传、保存失败回滚和网络错误脱敏。自包含 EXE 的 `--smoke-test` 已通过窗口、三按钮布局、位置状态标签、内置图标/照片、DPAPI 加密读写及旧失败记录迁移检查。上述测试未修改系统代理或信任存储。新版 SDK 对上游现有 ProtectedData 引用产生 `NU1510`，本地发布使用 `-p:WarningsNotAsErrors=NU1510` 保留该警告；真实打卡仍未验证。`docs/windows-ci.yml.example` 提供 Windows 自动构建、窗口启动和 DPAPI 检查的工作流示例。当前发布凭据没有 GitHub `workflow` 权限，因此示例尚未启用；有相应权限的维护者可将其放到 `.github/workflows/windows.yml`。
+本次发布在 macOS 使用 .NET 10 SDK 10.0.402 交叉编译 Windows x64 自包含 EXE；108 项核心/位置/上传检查、35 项采集协议/隔离本地 TLS 检查及 58 项服务器回归检查通过，共 201 项，测试均使用模拟平台。PR 贡献者在 Windows 11 上报告 108 + 37 项检查和 EXE 的 `--smoke-test` 通过；其中 2 项 Windows 密钥容器清理检查，以及原生界面、DPAPI 和真实微信采集，未在本次 macOS 发布环境重跑。PR 贡献者的真实上传记录与本次模拟验证分开看待。新版 SDK 如对现有 ProtectedData 引用产生 `NU1510`，可使用 `-p:WarningsNotAsErrors=NU1510` 保留该警告。`docs/windows-ci.yml.example` 提供 Windows 自动构建、窗口启动和 DPAPI 检查的工作流示例。当前发布凭据没有 GitHub `workflow` 权限，因此示例尚未启用；有相应权限的维护者可将其放到 `.github/workflows/windows.yml`。
 
 依赖下载若遇到 NuGet 网络问题，可为 `dotnet publish` 增加微软公开包源参数：
 
@@ -105,7 +105,7 @@ artifacts\win-x64\ClearPlate.exe --smoke-test
 | `tests/ClearPlate.Tests` | 无外部测试框架依赖的模拟请求检查 |
 | `docs/windows-ci.yml.example` | 需要 workflow 权限才能启用的 Windows 构建示例 |
 
-Windows 界面、微信 token 获取、最近位置同步和一次独立照片上传已在上述环境验证，异常退出恢复和真实打卡仍需继续验证。Windows ICO 已提交，普通源码构建无需图像工具；需要修改图标时，可在 Mac 用 `scripts/create-mac-icon.swift` 生成原始矢量图标渲染，再用 `scripts/create-windows-icon.py` 生成五种分辨率的 ICO。
+Windows 界面、微信 token 获取、最近位置同步和一次独立照片上传的实机结果由 PR 贡献者提供；本次发布只复验交叉构建及模拟测试，异常退出恢复和真实打卡仍需继续验证。Windows ICO 已提交，普通源码构建无需图像工具；需要修改图标时，可在 Mac 用 `scripts/create-mac-icon.swift` 生成原始矢量图标渲染，再用 `scripts/create-windows-icon.py` 生成五种分辨率的 ICO。
 
 这是非官方客户端，平台接口变化可能使功能失效。开源许可不授予任何平台账号或 API 权限。
 

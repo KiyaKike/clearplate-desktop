@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>ClearPlate</AssemblyName>
-    <Version>1.2.6</Version>
+    <Version>1.2.7</Version>
     <ApplicationIcon>Assets/ClearPlate.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>true</PublishSingleFile>
