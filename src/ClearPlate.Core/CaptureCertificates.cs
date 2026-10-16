@@ -40,7 +40,22 @@ public sealed class CaptureCertificates : IDisposable
         serverRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
         serverRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new("1.3.6.1.5.5.7.3.1") }, false));
         using var issued = serverRequest.Create(Root, now.AddMinutes(-1), now.AddMinutes(5), RandomNumberGenerator.GetBytes(16));
-        Server = issued.CopyWithPrivateKey(serverKey);
+        var server = issued.CopyWithPrivateKey(serverKey);
+        if (!OperatingSystem.IsWindows())
+        {
+            Server = server;
+            return;
+        }
+        // Schannel cannot use the ephemeral ECDSA key attached by
+        // CopyWithPrivateKey. Import into a temporary current-user container;
+        // omitting PersistKeySet lets certificate disposal delete the key.
+        using (server)
+        {
+            var pkcs12 = server.Export(X509ContentType.Pkcs12);
+            try { Server = X509CertificateLoader.LoadPkcs12(pkcs12, null, X509KeyStorageFlags.UserKeySet); }
+            catch { Root.Dispose(); throw; }
+            finally { CryptographicOperations.ZeroMemory(pkcs12); }
+        }
     }
     public void Dispose() { Server.Dispose(); Root.Dispose(); }
 }

@@ -4,13 +4,17 @@ namespace ClearPlate.Core;
 
 public sealed record Session(string Token, string AccountId, string Nickname);
 public sealed record UserProfile(string AccountId, string Nickname, int Successes, int Remaining,
-    string IssuedToken, DateTimeOffset? LastCheckIn);
+    string IssuedToken, DateTimeOffset? LastCheckIn)
+{
+    public string WechatLocation { get; init; } = "";
+}
 public sealed class AppState
 {
     public bool ScheduleEnabled { get; set; }
     public bool NeedsLogin { get; set; }
     public string GroupId { get; set; } = "";
     public string Location { get; set; } = "";
+    public string LocationSource { get; set; } = "";
     public HashSet<string> Attempted { get; set; } = [];
     public HashSet<string> Confirmed { get; set; } = [];
     public Dictionary<string, SlotRecord> Records { get; set; } = [];
@@ -23,6 +27,19 @@ public sealed record SlotRecord(string StartedAt, string UpdatedAt, string Stage
     public string RetryPolicy { get; init; } = "";
 }
 public enum ConnectionResult { Connected, NeedsCapture, Failed }
+public static class PlateLocation
+{
+    public static string Normalize(string value)
+    {
+        if (value.Length > 128) return "";
+        var parts = value.Split(',');
+        if (parts.Length != 2 || !double.TryParse(parts[0], CultureInfo.InvariantCulture, out var latitude)
+            || !double.TryParse(parts[1], CultureInfo.InvariantCulture, out var longitude)
+            || !double.IsFinite(latitude) || !double.IsFinite(longitude) || Math.Abs(latitude) > 90 || Math.Abs(longitude) > 180)
+            return "";
+        return latitude.ToString("R", CultureInfo.InvariantCulture) + "," + longitude.ToString("R", CultureInfo.InvariantCulture);
+    }
+}
 public static class PreUploadRecovery
 {
     public static bool CanRelease(SlotRecord record) => record.UploadStarted is not true && record.SubmissionStarted is not true

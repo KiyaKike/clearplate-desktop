@@ -7,7 +7,7 @@ public sealed class MainForm : Form
 {
     private readonly PlateEngine engine;
     private readonly TextBox group = new() { Width = 200 };
-    private readonly TextBox location = new() { Width = 390, PlaceholderText = "当天真实纬度,经度" };
+    private readonly Label location = new() { Name = "WechatLocationStatus", AutoSize = true, MaximumSize = new Size(520, 0) };
     private readonly CheckBox schedule = new() { AutoSize = true, Text = "每天 08:00 / 12:00 / 18:00 自动用内置照片打卡" };
     private readonly ComboBox slot = new() { Width = 120, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Label account = new() { AutoSize = true };
@@ -27,7 +27,7 @@ public sealed class MainForm : Form
     public MainForm(WindowsStore store, HttpClient client, bool startTimer = true)
     {
         var saved = store.Load();
-        engine = new(new PlateApi(client), saved.State, saved.Session, store.Save);
+        engine = new(new PlateApi(client), saved.State, saved.Session, store.Save, syncWechatLocation: true);
         Text = $"光盘打卡 · Windows x64 · v{typeof(MainForm).Assembly.GetName().Version?.ToString(3)} 试验版";
         using (var stream = typeof(MainForm).Assembly.GetManifestResourceStream("ClearPlate.icon.ico") ?? throw new IOException("应用图标缺失。"))
         using (var originalIcon = new Icon(stream)) appIcon = (Icon)originalIcon.Clone();
@@ -45,8 +45,9 @@ public sealed class MainForm : Form
         content.Controls.Add(Note("08:00 · 12:00 · 18:00（北京时间）  |  每餐一次，至少间隔 2 小时"));
         content.Controls.Add(account);
         content.Controls.Add(Row(new Label { Text = "组织 ID", Width = 100, AutoSize = false }, group));
-        content.Controls.Add(Row(new Label { Text = "打卡位置", Width = 100, AutoSize = false }, location));
-        group.Text = engine.State.GroupId; location.Text = engine.State.Location;
+        content.Controls.Add(Row(new Label { Text = "微信最近位置", Width = 120, AutoSize = false }, location));
+        group.Text = engine.State.GroupId;
+        content.Controls.Add(Note("位置沿用微信小程序最近记录；移动后请在小程序更新位置。每次打卡前同步，无需填写经纬度。"));
         using (var stream = new MemoryStream(DefaultPhoto().Bytes)) preview = new Bitmap(stream);
         content.Controls.Add(Row(new PictureBox { Image = preview, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(82, 82) },
             Note("内置照片：plate.png 原图\r\n自动打卡使用内置照片；手动可选择其他照片。")));
@@ -59,6 +60,7 @@ public sealed class MainForm : Form
         content.Controls.Add(record);
         moreMenu.Items.Add(MenuAction("选择照片打卡…", SelectPhotoAsync));
         moreMenu.Items.Add(MenuAction("检查账号状态", async () => { SaveSettings(); await engine.CheckAsync(); }));
+        moreMenu.Items.Add(MenuAction("同步微信最近位置", async () => { SaveSettings(); await engine.CheckAsync(); }));
         moreMenu.Items.Add(new ToolStripSeparator());
         moreMenu.Items.Add(MenuAction("打开光盘小程序", () => { OpenMiniProgram(); return Task.CompletedTask; }));
         moreMenu.Items.Add(MenuAction("重新获取微信登录…", StartCaptureAsync));
@@ -224,7 +226,7 @@ public sealed class MainForm : Form
     }
     private void SaveSettings()
     {
-        engine.State.GroupId = group.Text.Trim(); engine.State.Location = location.Text.Trim(); engine.Persist();
+        engine.State.GroupId = group.Text.Trim(); engine.Persist();
     }
     private async Task SelectPhotoAsync()
     {
@@ -249,6 +251,8 @@ public sealed class MainForm : Form
     private void UpdateUi()
     {
         account.Text = engine.Session is null ? "尚未配置会话" : "账号：" + engine.Session.Nickname;
+        location.Text = engine.State.LocationSource == "wechat" && engine.State.Location.Length > 0
+            ? "已从本人账号同步；打卡前再次检查" : "尚未取得有效位置，请在小程序更新后同步";
         status.Text = engine.Status; record.Text = engine.SlotText(SelectedSlot);
         overview.Text = string.Join(" · ", Schedule.Slots.Select(s => {
             var key = Schedule.Key(s, DateTimeOffset.UtcNow);
@@ -258,7 +262,7 @@ public sealed class MainForm : Form
         }));
         var ready = !engine.Busy && capture is null && !importingCapture;
         foreach (var button in actionButtons) button.Enabled = ready;
-        group.Enabled = location.Enabled = slot.Enabled = schedule.Enabled = ready;
+        group.Enabled = slot.Enabled = schedule.Enabled = ready;
         stopCapture.Visible = stopCapture.Enabled = capture is not null;
     }
     private void RestoreWindow() { Show(); WindowState = FormWindowState.Normal; Activate(); tray.Visible = false; }

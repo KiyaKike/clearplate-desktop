@@ -67,6 +67,8 @@ internal static class Program
             var actions = form.Controls.Find("PrimaryActions", true).Single();
             if (!actions.Controls.OfType<Button>().Select(button => button.Text).SequenceEqual(new[] { "立即打卡", "连接微信", "更多" }))
                 throw new Exception("Primary actions do not match expected compact layout");
+            if (form.Controls.Find("WechatLocationStatus", true).Single() is not Label)
+                throw new Exception("WeChat location should be displayed without a coordinate input");
             loaded = store.Load();
             if (loaded.State.Attempted.Contains(retryKey) || !loaded.State.Attempted.Contains(unknownKey)
                 || loaded.State.Records[retryKey].RetryPolicy != "manual" || loaded.State.Records[retryKey].UpdatedAt != "original-time"

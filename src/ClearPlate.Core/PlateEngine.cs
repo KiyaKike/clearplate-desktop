@@ -7,11 +7,15 @@ public sealed class PlateEngine
     private readonly PlateApi api;
     private readonly Action<Session?, AppState> save;
     private readonly Func<DateTimeOffset> now;
+    private readonly bool syncWechatLocation;
     public AppState State { get; }
     public Session? Session { get; private set; }
-    public PlateEngine(PlateApi api, AppState state, Session? session, Action<Session?, AppState> save, Func<DateTimeOffset>? clock = null)
+    public PlateEngine(PlateApi api, AppState state, Session? session, Action<Session?, AppState> save, Func<DateTimeOffset>? clock = null,
+        bool syncWechatLocation = false)
     {
         this.api = api; this.save = save; now = clock ?? (() => DateTimeOffset.UtcNow);
+        this.syncWechatLocation = syncWechatLocation;
+        if (syncWechatLocation) Status = "首次使用点击“连接微信”获取本人登录，并同步微信小程序最近位置。";
         State = state; Session = session;
         State.Attempted.UnionWith(State.Confirmed);
         RecoverUnsubmittedAttempts();
@@ -77,9 +81,12 @@ public sealed class PlateEngine
             if (Session is null && !approveFirstAccount(user)) { Message("已取消绑定账号，没有保存 token。"); return false; }
             var candidate = new Session(token, user.AccountId, user.Nickname);
             var paused = State.NeedsLogin;
+            var previousLocation = State.Location;
+            var previousSource = State.LocationSource;
             State.NeedsLogin = false;
+            SynchronizeLocation(user);
             try { save(candidate, State); }
-            catch { State.NeedsLogin = paused; throw; }
+            catch { State.NeedsLogin = paused; State.Location = previousLocation; State.LocationSource = previousSource; throw; }
             Session = candidate; Changed?.Invoke();
             Message($"会话已核验并保存，累计成功 {user.Successes} 次。服务器未提供 token 到期时间。");
             return true;
@@ -114,7 +121,7 @@ public sealed class PlateEngine
         Busy = true; Changed?.Invoke();
         try
         {
-            var user = await UserAsync(); State.NeedsLogin = false; Persist();
+            var user = await UserAsync(); SaveConnectedProfile(user);
             Message($"当前登录有效，累计成功 {user.Successes} 次，当天剩余计数 {user.Remaining}。token 到期时间未知。");
         }
         catch (Exception error) { Handle(error); }
@@ -127,7 +134,7 @@ public sealed class PlateEngine
         Busy = true; Changed?.Invoke();
         try
         {
-            await UserAsync(); State.NeedsLogin = false; Persist();
+            var user = await UserAsync(); SaveConnectedProfile(user);
             Message("已连接，保存的登录仍有效，无需重新采集或设置代理和证书。");
             return ConnectionResult.Connected;
         }
@@ -147,14 +154,33 @@ public sealed class PlateEngine
         if (error is LoginRequiredException) { State.NeedsLogin = true; Persist(); }
         Message(error is HttpRequestException or TaskCanceledException ? "网络请求失败：" + error.Message : error.Message);
     }
-    private static void ValidateSettings(AppState state)
+    private void SynchronizeLocation(UserProfile user)
+    {
+        if (!syncWechatLocation) return;
+        State.Location = user.WechatLocation;
+        State.LocationSource = "wechat";
+    }
+    private void SaveConnectedProfile(UserProfile user)
+    {
+        var previousLocation = State.Location;
+        var previousSource = State.LocationSource;
+        var previousLogin = State.NeedsLogin;
+        SynchronizeLocation(user); State.NeedsLogin = false;
+        try { Persist(); }
+        catch
+        {
+            State.Location = previousLocation; State.LocationSource = previousSource; State.NeedsLogin = previousLogin;
+            throw;
+        }
+    }
+    private void ValidateSettings(AppState state, bool beforeAccountQuery = false)
     {
         if (state.GroupId.Length > 0 && !int.TryParse(state.GroupId, out _)) throw new ArgumentException("组织 ID 需为整数，或按本人请求留空。");
-        var parts = state.Location.Split(',');
-        if (parts.Length != 2 || !double.TryParse(parts[0], CultureInfo.InvariantCulture, out var latitude)
-            || !double.TryParse(parts[1], CultureInfo.InvariantCulture, out var longitude)
-            || !double.IsFinite(latitude) || !double.IsFinite(longitude) || Math.Abs(latitude) > 90 || Math.Abs(longitude) > 180)
-            throw new ArgumentException("请填写当天真实位置，格式为纬度,经度。");
+        if (syncWechatLocation && beforeAccountQuery) return;
+        if (PlateLocation.Normalize(state.Location).Length == 0)
+            throw new ArgumentException(syncWechatLocation
+                ? "未取得微信小程序的有效最近位置。请在小程序更新位置后重试，未上传照片。"
+                : "请填写当天真实位置，格式为纬度,经度。");
     }
     private static bool TransientNetwork(Exception error) => error is TaskCanceledException
         || error is HttpRequestException { HttpRequestError: System.Net.Http.HttpRequestError.ConnectionError
@@ -173,7 +199,7 @@ public sealed class PlateEngine
         var key = Schedule.Key(slot, now());
         if (State.NeedsLogin || Session is null) { Message("请先点击“连接微信”获取有效的本人登录。"); return; }
         if (State.Attempted.Contains(key) || State.Confirmed.Contains(key)) { Message(SlotText(slot) + " 本时段不会重复提交，请先核对小程序。"); return; }
-        try { ValidateSettings(State); } catch (Exception error) { Message(error.Message); return; }
+        try { ValidateSettings(State, beforeAccountQuery: true); } catch (Exception error) { Message(error.Message); return; }
         Busy = true;
         var stage = "准备照片"; var uploadStarted = false; var submissionStarted = false; var rejected = false;
         try
@@ -184,6 +210,7 @@ public sealed class PlateEngine
                 || photo.Extension is not ("png" or "jpg")) throw new ArgumentException("请选择 1 KB 至 20 MB 的有效 JPG 或 PNG 照片。");
             stage = "查询账号"; Record(key, stage, "执行中", "");
             var before = await UserAsync();
+            if (syncWechatLocation) { SynchronizeLocation(before); ValidateSettings(State); }
             if (before.LastCheckIn is { } last && now() < last.AddHours(2))
             {
                 State.Attempted.Remove(key);

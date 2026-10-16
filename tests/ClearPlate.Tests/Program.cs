@@ -198,6 +198,9 @@ handler = new(() => now);
 engine = new(new PlateApi(new HttpClient(handler)), Fresh(), null, (_, _) => { }, () => now);
 Check(await engine.ConnectAsync() == ConnectionResult.NeedsCapture && handler.Calls == 0, "missing login requests capture without sending blank credentials");
 
+checks += await WechatLocationChecks.RunAsync();
+checks += await UploadFailureChecks.RunAsync();
+checks += await UploadFormChecks.RunAsync();
 var captureChecks = await CaptureChecks.RunAsync();
 Console.WriteLine($"PASS: {checks} business checks + {captureChecks} capture protocol / isolated local TLS checks; no live requests, no system trust or proxy changes.");
 

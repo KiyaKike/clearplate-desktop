@@ -11,6 +11,26 @@ public sealed class PlateApi(HttpClient http, Func<DateTimeOffset>? clock = null
     public static bool ValidToken(string token) => token.Length is > 0 and <= 4096
         && !token.StartsWith("code|:|", StringComparison.Ordinal)
         && token.All(c => c is >= (char)33 and <= (char)126);
+    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, string step)
+    {
+        try { return await http.SendAsync(request); }
+        catch (HttpRequestException error)
+        {
+            // Fixed step labels and native codes only: exception text can contain
+            // URLs, credentials or profile data and must not enter local records.
+            var detail = error.HttpRequestError.ToString();
+            var depth = 0;
+            for (Exception? inner = error.InnerException; inner is not null && depth++ < 8; inner = inner.InnerException)
+            {
+                if (inner is System.Net.Sockets.SocketException socket) { detail += "/" + socket.SocketErrorCode; break; }
+                if (inner is System.ComponentModel.Win32Exception native) { detail += "/0x" + native.NativeErrorCode.ToString("X8"); break; }
+                if (inner is System.Security.Authentication.AuthenticationException) detail += "/TLS";
+                else if (inner is IOException) detail += "/IO:0x" + inner.HResult.ToString("X8");
+            }
+            throw new HttpRequestException(error.HttpRequestError, step + "网络请求失败（" + detail + "）。", error, error.StatusCode);
+        }
+        catch (TaskCanceledException error) { throw new TaskCanceledException(step + "请求超时（TIMEOUT）。", error); }
+    }
     private async Task<JsonElement> RequestAsync(string token, string route, Dictionary<string, string>? form = null)
     {
         if (!ValidToken(token)) throw new ArgumentException("请输入完整的本人 X-Token，微信临时 code 不能作为 token。");
@@ -23,10 +43,12 @@ public sealed class PlateApi(HttpClient http, Func<DateTimeOffset>? clock = null
         request.Headers.Add("X-Requested-With", "XMLHttpRequest");
         request.Headers.UserAgent.ParseAdd("ClearPlateDesktop/1.0");
         if (form is not null) request.Content = new FormUrlEncodedContent(form);
-        using var response = await http.SendAsync(request);
+        var step = route switch {
+            "/user/user-info" => "查询账号", "/upload/my-upload" => "申请上传凭证", "/user-clear-plate/clear-plate" => "提交打卡", _ => "平台请求" };
+        using var response = await SendAsync(request, step);
         if (response.StatusCode == HttpStatusCode.Unauthorized) throw new LoginRequiredException();
         if (response.StatusCode != HttpStatusCode.OK)
-            throw new BusinessException(0, $"接口返回 HTTP {(int)response.StatusCode}，未确认业务成功。");
+            throw new BusinessException(0, $"{step}返回 HTTP {(int)response.StatusCode}，未确认业务成功。");
         JsonElement result;
         try
         {
@@ -56,7 +78,10 @@ public sealed class PlateApi(HttpClient http, Func<DateTimeOffset>? clock = null
             try { last = DateTimeOffset.FromUnixTimeSeconds(seconds); }
             catch (ArgumentOutOfRangeException) { throw new BusinessException(0, "最近打卡时间异常，已停止操作。"); }
         }
-        return new(id, Text(data, "nickname"), successes, remaining, Text(data, "token"), last);
+        return new(id, Text(data, "nickname"), successes, remaining, Text(data, "token"), last)
+        {
+            WechatLocation = PlateLocation.Normalize(Text(data, "last_location"))
+        };
     }
     public async Task<string> UploadAsync(string token, byte[] photo, string mime, string extension)
     {
@@ -75,18 +100,29 @@ public sealed class PlateApi(HttpClient http, Func<DateTimeOffset>? clock = null
             throw new BusinessException(0, "上传凭证格式或目标地址异常，未上传照片。");
         var key = prefix + Guid.NewGuid().ToString("N") + "." + extension;
         using var body = new MultipartFormDataContent();
+        // The upload gateway rejects .NET's default multipart headers. Match
+        // browser forms: bare boundary, quoted names, no text-part Content-Type,
+        // and Content-Disposition before the file Content-Type (file stays last).
+        var boundary = body.Headers.ContentType!.Parameters.Single(p => p.Name == "boundary");
+        boundary.Value = boundary.Value!.Trim('"');
         foreach (var pair in new Dictionary<string, string> {
             ["key"] = key, ["policy"] = Text(data, "policy"), ["OSSAccessKeyId"] = Text(data, "accessid"),
             ["success_action_status"] = "200", ["signature"] = Text(data, "signature"), ["Content-Type"] = mime })
-            body.Add(new StringContent(pair.Value), pair.Key);
+        {
+            var field = new StringContent(pair.Value);
+            field.Headers.ContentType = null;
+            field.Headers.ContentDisposition = new("form-data") { Name = $"\"{pair.Key}\"" };
+            body.Add(field);
+        }
         var file = new ByteArrayContent(photo);
+        file.Headers.ContentDisposition = new("form-data") { Name = "\"file\"", FileName = $"\"{Path.GetFileName(key)}\"" };
         file.Headers.ContentType = MediaTypeHeaderValue.Parse(mime);
-        body.Add(file, "file", Path.GetFileName(key));
+        body.Add(file);
         using var request = new HttpRequestMessage(HttpMethod.Post, destination) { Content = body };
         // OSS gets its signed form only; no login token is attached.
-        using var response = await http.SendAsync(request);
+        using var response = await SendAsync(request, "发送照片");
         if (response.StatusCode != HttpStatusCode.OK)
-            throw new BusinessException(0, "照片上传未返回 HTTP 200，未提交打卡。");
+            throw new BusinessException(0, $"照片上传返回 HTTP {(int)response.StatusCode}，未提交打卡。");
         return "/" + key;
     }
     public async Task PunchAsync(string token, string groupId, string location, string path)

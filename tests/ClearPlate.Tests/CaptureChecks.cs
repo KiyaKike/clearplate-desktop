@@ -3,6 +3,8 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
@@ -89,31 +91,53 @@ internal static class CaptureChecks
         Check(CaptureDiagnostics.Failure("upstream", new TaskCanceledException()) == "UPSTREAM_TIMEOUT", "upstream timeout classified");
         Check(CaptureDiagnostics.Describe("HTTP_412").Contains("HTTP 412", StringComparison.Ordinal), "platform rejection does not blame certificate");
         Check(!CaptureDiagnostics.Describe("fake-private-token").Contains("fake-private-token", StringComparison.Ordinal), "unknown code never echoed");
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
-        try
+        foreach (var protocol in new[] { SslProtocols.None, SslProtocols.Tls12 })
         {
-            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            var server = Task.Run(async () => {
-                using var tcp = await listener.AcceptTcpClientAsync(deadline.Token);
-                using var ssl = new SslStream(tcp.GetStream());
-                var context = SslStreamCertificateContext.Create(certificates.Server, new X509Certificate2Collection { certificates.Root }, offline: true);
-                await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificateContext = context }, deadline.Token);
-                var head = await CaptureProtocol.ReadHeadAsync(ssl, deadline.Token);
-                if (head is null) throw new Exception("Missing synthetic request");
-                await ssl.WriteAsync(success, deadline.Token);
-            });
-            using var client = new TcpClient(); await client.ConnectAsync(IPAddress.Loopback, port, deadline.Token);
-            using var ssl = new SslStream(client.GetStream());
-            var options = new SslClientAuthenticationOptions { TargetHost = CaptureProtocol.ApiHost,
-                CertificateChainPolicy = new X509ChainPolicy { TrustMode = X509ChainTrustMode.CustomRootTrust, RevocationMode = X509RevocationMode.NoCheck } };
-            options.CertificateChainPolicy.CustomTrustStore.Add(certificates.Root);
-            await ssl.AuthenticateAsClientAsync(options, deadline.Token);
-            await ssl.WriteAsync("GET /index.php?r=/user/user-info HTTP/1.1\r\nHost: clearplate-api.guangpanxingdong.com\r\n\r\n"u8.ToArray(), deadline.Token);
-            var body = new byte[success.Length]; await ssl.ReadExactlyAsync(body, deadline.Token); await server;
-            Check(CaptureProtocol.Candidate(CaptureProtocol.ApiHost, 200, "/user/user-info", headers, body, null) == "fake-issued-token", "local TLS transport capture, normal hostname and isolated root validation");
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
+            try
+            {
+                var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                var server = Task.Run(async () => {
+                    using var tcp = await listener.AcceptTcpClientAsync(deadline.Token);
+                    using var ssl = new SslStream(tcp.GetStream());
+                    var context = SslStreamCertificateContext.Create(certificates.Server, new X509Certificate2Collection { certificates.Root }, offline: true);
+                    await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificateContext = context,
+                        ApplicationProtocols = [SslApplicationProtocol.Http11], EnabledSslProtocols = protocol }, deadline.Token);
+                    var head = await CaptureProtocol.ReadHeadAsync(ssl, deadline.Token);
+                    if (head is null) throw new Exception("Missing synthetic request");
+                    await ssl.WriteAsync(success, deadline.Token);
+                });
+                using var client = new TcpClient(); await client.ConnectAsync(IPAddress.Loopback, port, deadline.Token);
+                using var ssl = new SslStream(client.GetStream());
+                var options = new SslClientAuthenticationOptions { TargetHost = CaptureProtocol.ApiHost,
+                    ApplicationProtocols = [SslApplicationProtocol.Http11], EnabledSslProtocols = protocol,
+                    CertificateChainPolicy = new X509ChainPolicy { TrustMode = X509ChainTrustMode.CustomRootTrust, RevocationMode = X509RevocationMode.NoCheck } };
+                options.CertificateChainPolicy.CustomTrustStore.Add(certificates.Root);
+                await ssl.AuthenticateAsClientAsync(options, deadline.Token);
+                Check(ssl.NegotiatedApplicationProtocol == SslApplicationProtocol.Http11, "capture TLS negotiates HTTP/1.1: " + protocol);
+                await ssl.WriteAsync("GET /index.php?r=/user/user-info HTTP/1.1\r\nHost: clearplate-api.guangpanxingdong.com\r\n\r\n"u8.ToArray(), deadline.Token);
+                var body = new byte[success.Length]; await ssl.ReadExactlyAsync(body, deadline.Token); await server;
+                Check(CaptureProtocol.Candidate(CaptureProtocol.ApiHost, 200, "/user/user-info", headers, body, null) == "fake-issued-token", "local TLS transport capture, normal hostname and isolated root validation: " + protocol);
+            }
+            finally { listener.Stop(); }
         }
-        finally { listener.Stop(); }
+        if (OperatingSystem.IsWindows())
+        {
+            // Schannel needs a user key container, but it must not outlive capture.
+            // Check the provider before/after Dispose rather than assuming that
+            // HasPrivateKey means the native TLS stack can use the key.
+            string keyName;
+            CngProvider provider;
+            using (var key = (ECDsaCng)certificates.Server.GetECDsaPrivateKey()!)
+            {
+                keyName = key.Key.KeyName ?? throw new Exception("Capture TLS key has no Windows key container");
+                provider = key.Key.Provider ?? throw new Exception("Capture TLS key has no Windows provider");
+                Check(CngKey.Exists(keyName, provider), "capture TLS user key exists while certificate is alive");
+            }
+            certificates.Dispose();
+            Check(!CngKey.Exists(keyName, provider), "capture TLS user key is deleted when certificates are disposed");
+        }
         return count;
     }
 }
