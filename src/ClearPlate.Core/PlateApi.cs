@@ -98,32 +98,44 @@ public sealed class PlateApi(HttpClient http, Func<DateTimeOffset>? clock = null
             || !double.TryParse(Text(data, "expire"), CultureInfo.InvariantCulture, out var expiry)
             || expiry <= now().ToUnixTimeSeconds() + 2)
             throw new BusinessException(0, "上传凭证格式或目标地址异常，未上传照片。");
-        var key = prefix + Guid.NewGuid().ToString("N") + "." + extension;
-        using var body = new MultipartFormDataContent();
-        // The upload gateway rejects .NET's default multipart headers. Match
-        // browser forms: bare boundary, quoted names, no text-part Content-Type,
-        // and Content-Disposition before the file Content-Type (file stays last).
-        var boundary = body.Headers.ContentType!.Parameters.Single(p => p.Name == "boundary");
-        boundary.Value = boundary.Value!.Trim('"');
-        foreach (var pair in new Dictionary<string, string> {
-            ["key"] = key, ["policy"] = Text(data, "policy"), ["OSSAccessKeyId"] = Text(data, "accessid"),
-            ["success_action_status"] = "200", ["signature"] = Text(data, "signature"), ["Content-Type"] = mime })
+        const int maxAttempts = 2;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            var field = new StringContent(pair.Value);
-            field.Headers.ContentType = null;
-            field.Headers.ContentDisposition = new("form-data") { Name = $"\"{pair.Key}\"" };
-            body.Add(field);
+            var key = prefix + Guid.NewGuid().ToString("N") + "." + extension;
+            using var body = new MultipartFormDataContent();
+            // The upload gateway rejects .NET's default multipart headers. Match
+            // browser forms: bare boundary, quoted names, no text-part Content-Type,
+            // and Content-Disposition before the file Content-Type (file stays last).
+            var boundary = body.Headers.ContentType!.Parameters.Single(p => p.Name == "boundary");
+            boundary.Value = boundary.Value!.Trim('"');
+            foreach (var pair in new Dictionary<string, string> {
+                ["key"] = key, ["policy"] = Text(data, "policy"), ["OSSAccessKeyId"] = Text(data, "accessid"),
+                ["success_action_status"] = "200", ["signature"] = Text(data, "signature"), ["Content-Type"] = mime })
+            {
+                var field = new StringContent(pair.Value);
+                field.Headers.ContentType = null;
+                field.Headers.ContentDisposition = new("form-data") { Name = $"\"{pair.Key}\"" };
+                body.Add(field);
+            }
+            var file = new ByteArrayContent(photo);
+            file.Headers.ContentDisposition = new("form-data") { Name = "\"file\"", FileName = $"\"{Path.GetFileName(key)}\"" };
+            file.Headers.ContentType = MediaTypeHeaderValue.Parse(mime);
+            body.Add(file);
+            using var request = new HttpRequestMessage(HttpMethod.Post, destination) { Content = body };
+            try
+            {
+                // OSS gets its signed form only; no login token is attached.
+                using var response = await SendAsync(request, "发送照片");
+                if (response.StatusCode != HttpStatusCode.OK)
+                    throw new BusinessException(0, $"照片上传返回 HTTP {(int)response.StatusCode}，未提交打卡。");
+                return "/" + key;
+            }
+            catch (TaskCanceledException) when (attempt < maxAttempts)
+            {
+                await Task.Delay(1000);
+            }
         }
-        var file = new ByteArrayContent(photo);
-        file.Headers.ContentDisposition = new("form-data") { Name = "\"file\"", FileName = $"\"{Path.GetFileName(key)}\"" };
-        file.Headers.ContentType = MediaTypeHeaderValue.Parse(mime);
-        body.Add(file);
-        using var request = new HttpRequestMessage(HttpMethod.Post, destination) { Content = body };
-        // OSS gets its signed form only; no login token is attached.
-        using var response = await SendAsync(request, "发送照片");
-        if (response.StatusCode != HttpStatusCode.OK)
-            throw new BusinessException(0, $"照片上传返回 HTTP {(int)response.StatusCode}，未提交打卡。");
-        return "/" + key;
+        throw new BusinessException(0, "照片上传超时，已停止提交。");
     }
     public async Task PunchAsync(string token, string groupId, string location, string path)
     {

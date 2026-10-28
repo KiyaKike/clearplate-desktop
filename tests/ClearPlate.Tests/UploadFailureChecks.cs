@@ -43,7 +43,29 @@ internal static class UploadFailureChecks
                 throw new Exception("FAILED upload: report rejected image HTTP status without response body");
             count++;
         }
+        var timeoutRetryHandler = new TimeoutRetryHandler();
+        var uploadedPath = await new PlateApi(new HttpClient(timeoutRetryHandler), () => now).UploadAsync("fake-private-token", new byte[2048], "image/png", "png");
+        if (timeoutRetryHandler.ImageRequests != 2 || !uploadedPath.StartsWith("/clockImg/", StringComparison.Ordinal))
+            throw new Exception("FAILED upload: transient timeout must retry and succeed on second attempt");
+        count++;
         return count;
+    }
+
+    private sealed class TimeoutRetryHandler : HttpMessageHandler
+    {
+        internal int ImageRequests;
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.Host == "clearplateimg.guangpanxingdong.com")
+            {
+                ImageRequests++;
+                if (ImageRequests == 1) throw new TaskCanceledException();
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(
+                "{\"code\":10007,\"data\":{\"host\":\"https://clearplateimg.guangpanxingdong.com\",\"dir\":\"clockImg/2026/10/15/\",\"policy\":\"fake\",\"accessid\":\"fake\",\"signature\":\"fake\",\"expire\":4102444800}}",
+                Encoding.UTF8, "application/json") });
+        }
     }
 
     private sealed class FailureHandler(bool credentialFailure) : HttpMessageHandler
