@@ -17,7 +17,8 @@ public static class ServerApp
         builder.Logging.ClearProviders(); builder.Logging.AddSimpleConsole(); builder.Logging.SetMinimumLevel(LogLevel.Warning);
         builder.WebHost.ConfigureKestrel(server => { server.Limits.MaxRequestBodySize = 21 * 1024 * 1024; server.AddServerHeader = false; });
         builder.Services.AddSingleton(options); builder.Services.AddSingleton<WebSessions>();
-        builder.Services.AddSingleton(http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromSeconds(45) });
+        var timeoutSec = int.TryParse(Environment.GetEnvironmentVariable("CLEARPLATE_HTTP_TIMEOUT"), out var s) && s > 0 ? s : 90;
+        builder.Services.AddSingleton(http ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromSeconds(timeoutSec) });
         builder.Services.AddSingleton(services => new ServerController(options, services.GetRequiredService<HttpClient>(), clock));
         builder.Services.AddHostedService<PlanWorker>();
         builder.Services.AddRateLimiter(rates =>

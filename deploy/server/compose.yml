@@ -15,6 +15,7 @@ services:
       CLEARPLATE_DATA_DIR: /data
       CLEARPLATE_KEY_FILE: /run/secrets/session_key
       CLEARPLATE_PASSWORD_FILE: /run/secrets/admin_password
+      CLEARPLATE_HTTP_TIMEOUT: "${CLEARPLATE_HTTP_TIMEOUT:-90}"
     secrets:
       - session_key
       - admin_password
