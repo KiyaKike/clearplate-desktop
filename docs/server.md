@@ -65,7 +65,7 @@ CLEARPLATE_PUBLIC_ORIGIN=https://your-domain.example
 
 然后运行 `docker compose up -d` 重建服务。浏览器必须使用完全相同的站点来源（协议、主机、端口），否则修改请求会被拒绝。HTTPS 模式使用 Secure、HttpOnly、SameSite=Strict 会话 cookie。管理会话最多 8 小时，服务重启后需重新登录；页面自带 CSRF 校验及登录限速。
 
-如调整宿主端口，需要同时调整 `.env` 中的 `CLEARPLATE_PORT` 和公开来源。例如 SSH 隧道访问 `http://localhost:8888` 时，设置端口 8888 并将来源设置为该地址。
+如调整宿主端口，需要同时调整 `.env` 中的 `CLEARPLATE_PORT` 和公开来源。例如 SSH 隧道访问 `http://localhost:8888` 时，设置端口 8888 并将来源设置为该地址。 如在跨地域或高延迟网络中部署，可在 `.env` 中设置 `CLEARPLATE_HTTP_TIMEOUT=90`（默认 90 秒）延长请求超时时间。
 
 ## 5. 数据、备份和升级
 
